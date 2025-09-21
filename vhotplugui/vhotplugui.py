@@ -1,5 +1,6 @@
 import logging
 import argparse
+import tkinter as tk
 import customtkinter as ctk
 from vhotplugui.apiclient import APIClient
 
@@ -40,20 +41,29 @@ class MainWindow:
         window.grab_set()
         window.wait_window()
 
-    def connect_device(self, usb_dev, vm_combo, window):
-        selected_vm = vm_combo.get()
-        device_node = usb_dev.get("device_node")
-        logger.info("Connecting %s to %s", device_node, selected_vm)
-
-        res = self.client.usb_attach(device_node, selected_vm)
+    def connect_usb(self, dev, vm_name):
+        device_node = dev.get("device_node")
+        logger.info("Connecting %s to %s", device_node, vm_name)
+        res = self.client.usb_attach(device_node, vm_name)
         logger.info("Result: %s", res)
-
         if res.get("result") == "failed":
-            error_msg = res.get("error")
-            self.message_box("USB Attach Failed", f"Failed to attach: {error_msg}")
+            self.message_box("USB Attach Failed", res.get("error"))
         else:
             logger.info("Successfully attached")
 
+    def disconnect_usb(self, dev):
+        device_node = dev.get("device_node")
+        logger.info("Disconnecting %s", device_node)
+        res = self.client.usb_detach(device_node)
+        logger.info("Result: %s", res)
+        if res.get("result") == "failed":
+            self.message_box("USB Detach Failed", res.get("error"))
+        else:
+            logger.info("Successfully detached")
+
+    def select_vm(self, usb_dev, vm_combo, window):
+        selected_vm = vm_combo.get()
+        self.connect_usb(usb_dev, selected_vm)
         window.destroy()
 
     def deny_device(self, _usb_dev, window):
@@ -82,10 +92,24 @@ class MainWindow:
         deny_btn = ctk.CTkButton(button_frame, text="Deny", width=100, command=lambda: self.deny_device(usb_dev, window),)
         deny_btn.grid(row=0, column=0, padx=10, sticky="W")
 
-        connect_btn = ctk.CTkButton(button_frame, text="Connect", width=100, command=lambda: self.connect_device(usb_dev, vm_combo, window),)
+        connect_btn = ctk.CTkButton(button_frame, text="Connect", width=100, command=lambda: self.select_vm(usb_dev, vm_combo, window),)
         connect_btn.grid(row=0, column=1, padx=10, sticky="E")
 
         #window.mainloop()
+
+    def show_context_menu(self, event, dev):
+        context_menu = tk.Menu(self.main_window, tearoff=0)
+        vms_available = False
+        for vm_name in dev.get("allowed_vms", []):
+            if vm_name != dev.get("vm"):
+                context_menu.add_command(label=f"Connect to {vm_name}", command=lambda dev=dev, vm=vm_name: self.connect_usb(dev, vm))
+                vms_available = True
+        if vms_available:
+            context_menu.add_separator()
+        context_menu.add_command(label="Disconnect from VM", command=lambda dev=dev: self.disconnect_usb(dev))
+        context_menu.add_command(label="Cancel", command=self.refresh_list)
+        context_menu.tk_popup(event.x_root, event.y_root)
+        context_menu.grab_release()
 
     def refresh_list(self):
         for widget in self.content_frame.winfo_children():
@@ -107,6 +131,7 @@ class MainWindow:
 
             lbl_vm = ctk.CTkLabel(row, text=vm, anchor="w", width=180)
             lbl_vm.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+            lbl_vm.bind("<Button-3>", lambda e, d=dev: self.show_context_menu(e, d))
 
     def notification(self, msg):
         logger.info("Notification received: %s", msg)
